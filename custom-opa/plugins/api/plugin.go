@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/open-policy-agent/opa/plugins"
+	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/util"
 	"google.golang.org/grpc"
 )
@@ -66,7 +67,30 @@ func (s *Server) Authz(ctx context.Context, req *AuthzRequest) (*AuthzResponse, 
 		Allow: false,
 	}
 
-	// Evaluate the policy... ??
+	input := map[string]interface{}{
+		"jwt": req.Jwt,
+	}
+
+	pq, err := rego.New(
+		rego.Query("data.authz.allow"),
+
+		// Policies?? External Data???
+
+	).PrepareForEval(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	rs, err := pq.Eval(ctx, rego.EvalInput(input))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rs) > 0 {
+		resp.Allow = rs[0].Expressions[0].Value.(bool)
+	}
+
+	// Decision logs??
 
 	return resp, nil
 }
