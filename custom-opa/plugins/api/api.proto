@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option go_package = "github.com/patrick-east/kubecon-na-2020/custom-opa/plugins/api";
+
+package opa;
+
+service Authorizer {
+  rpc Authz (AuthzRequest) returns (AuthzResponse) {}
+}
+
+message AuthzRequest {
+  string jwt = 1;
+}
+
+message AuthzResponse {
+  bool allow = 1;
+}
