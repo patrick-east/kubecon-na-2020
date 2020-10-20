@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/open-policy-agent/opa/plugins"
+	"github.com/open-policy-agent/opa/plugins/logs"
 	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/server"
+	"github.com/open-policy-agent/opa/storage"
 	"github.com/open-policy-agent/opa/util"
 	"google.golang.org/grpc"
 )
@@ -24,9 +28,18 @@ type Server struct {
 	mtx     sync.Mutex
 	config  Config
 	grpcServer  *grpc.Server
+	decisionLogger *logs.Plugin
 }
 
 func (s *Server) Start(ctx context.Context) error {
+
+	p := s.manager.Plugin(logs.Name)
+	if p != nil {
+		if logger, ok := p.(*logs.Plugin); ok {
+			s.decisionLogger = logger
+		}
+	}
+
 	lis, err := net.Listen("tcp", s.config.Listen)
 	if err != nil {
 		s.manager.UpdatePluginStatus(PluginName, &plugins.Status{State: plugins.StateErr})
@@ -67,32 +80,48 @@ func (s *Server) Authz(ctx context.Context, req *AuthzRequest) (*AuthzResponse, 
 		Allow: false,
 	}
 
-	input := map[string]interface{}{
+	var input interface{} = map[string]interface{}{
 		"jwt": req.Jwt,
 	}
 
-	pq, err := rego.New(
-		rego.Query("data.authz.allow"),
+	query := "data.authz.allow"
 
-		// Policies?? External Data???
+	err := storage.Txn(ctx, s.manager.Store, storage.TransactionParams{}, func(txn storage.Transaction) error {
 
-	).PrepareForEval(ctx)
-	if err != nil {
-		return nil, err
-	}
+		pq, err := rego.New(
+			rego.Query(query),
+			rego.Transaction(txn),
+			rego.Store(s.manager.Store),
+			rego.Compiler(s.manager.GetCompiler()),
+		).PrepareForEval(ctx)
 
-	rs, err := pq.Eval(ctx, rego.EvalInput(input))
-	if err != nil {
-		return nil, err
-	}
+		if err != nil {
+			return err
+		}
 
-	if len(rs) > 0 {
-		resp.Allow = rs[0].Expressions[0].Value.(bool)
-	}
+		rs, err := pq.Eval(ctx, rego.EvalInput(input))
+		if err != nil {
+			return err
+		}
 
-	// Decision logs??
+		if len(rs) > 0 {
+			resp.Allow = rs[0].Expressions[0].Value.(bool)
+		}
 
-	return resp, nil
+		if s.decisionLogger != nil {
+			var result interface{} = resp.Allow
+			return s.decisionLogger.Log(ctx, &server.Info{
+				Txn: txn,
+				Query: query,
+				Timestamp: time.Now(),
+				Input: &input,
+				Results: &result,
+			})
+		}
+		return nil
+	})
+
+	return resp, err
 }
 
 type Factory struct{}
