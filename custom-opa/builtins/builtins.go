@@ -42,7 +42,7 @@ func myBuiltinImpl(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 	}
 
 	// Guess the JWKS URL
-	jwksURL := baseURL + "./well-known/jwks.json"
+	jwksURL := baseURL + "/.well-known/jwks.json"
 
 	// See if there is an openid config, use the `jwks_url` if available
 	resp, err := http.Get(baseURL + "/.well-known/openid-configuration")
@@ -65,7 +65,9 @@ func myBuiltinImpl(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 		bs, err := ioutil.ReadAll(resp.Body)
 		if err == nil {
 			// Return the JWKS string
-			return ast.StringTerm(string(bs)), nil
+			jwks := ast.StringTerm(string(bs))
+			bctx.Cache.Put(cacheKey, jwks)
+			return jwks, nil
 		}
 	}
 
